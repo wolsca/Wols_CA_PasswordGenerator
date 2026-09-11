@@ -1,0 +1,27 @@
+# CMake build directories
+/cmake-build-debug/
+/cmake-build-release/
+/build/
+/out/
+/bin/
+
+# Compiled files
+*.obj
+*.res
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.exe
+
+# IDE specific files
+.vs/
+.idea/
+*.user
+*.suo
+
+# OS and temp files
+Thumbs.db
+[Dd]esktop.ini
+*.log
+*.tmp
