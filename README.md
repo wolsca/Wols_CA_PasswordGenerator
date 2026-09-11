@@ -46,10 +46,15 @@ A fast, secure, and cross-platform C++20 password generator application with sys
 
 ### Windows (PowerShell Scripts)
 
-Convenience scripts are provided for building and launching:
-- **Rebuild Release**: `.\rebuild_Release.ps1`
-- **Start Release**: `.\start_release.ps1`
-- **Start Debug**: `.\start_debug.ps1`
+Convenience scripts are provided for building, launching, and repository management:
+- **Rebuild Release**: `.\rebuild_Release.ps1` (Cleans and compiles an optimized Release build)
+- **Start Release**: `.\start_release.ps1` (Launches the Release build)
+- **Start Debug**: `.\start_debug.ps1` (Launches the Debug build)
+- **Commit & Push**: `.\commit.ps1` (Stages changes, formats the commit message from `CHANGELOG.md`, and pushes to GitHub)
+
+### Version Tracking and Changelog
+Project changes and release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md).
+Before running `.\commit.ps1`, record any changes made since the last commit under the `## [Unreleased]` section. `commit.ps1` will automatically use this description for the Git commit message.
 
 ### Manual Windows Build
 ```powershell
