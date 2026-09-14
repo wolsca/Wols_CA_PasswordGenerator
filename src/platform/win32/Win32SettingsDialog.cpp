@@ -74,6 +74,12 @@ namespace {
             ctx = (DialogContext*)cs->lpCreateParams;
             SetWindowLongPtrW(hWnd, GWLP_USERDATA, (LONG_PTR)ctx);
 
+            // Set dialog icons
+            HICON hIconBig = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+            HICON hIconSm = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+            if (hIconBig) SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+            if (hIconSm) SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+
             ctx->hFont = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                                      CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
@@ -319,6 +325,8 @@ bool Win32SettingsDialog::show(HWND hParent, core::PasswordOptions& options) {
     wc.lpszClassName = CLASS_NAME;
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hIcon = LoadIcon(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON));
+    wc.hIconSm = (HICON)LoadImage(GetModuleHandle(NULL), MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
     RegisterClassExW(&wc);
 
     DialogContext ctx;

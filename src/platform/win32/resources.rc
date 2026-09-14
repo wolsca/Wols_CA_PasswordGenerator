@@ -1,4 +1,6 @@
 #include "resource.h"
 #include <windows.h>
 
-// Resource definitions
+// Application & Tray Icon
+IDI_APP_ICON    ICON    "app.ico"
+IDI_TRAY_ICON   ICON    "app.ico"

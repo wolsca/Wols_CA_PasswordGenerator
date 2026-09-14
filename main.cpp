@@ -1,29 +1,20 @@
-#include <iostream>
-
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include "platform/win32/Win32App.h"
-#else
-#include "platform/linux/LinuxApp.h"
-#endif
-
-#ifdef _WIN32
-
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow) {
-    win32::Win32App app;
-    return app.run(hInstance, nCmdShow);
-}
+#include <QApplication>
+#include <QStyleFactory>
+#include "gui/MainWindow.h"
 
 int main(int argc, char* argv[]) {
-    return wWinMain(GetModuleHandle(NULL), NULL, GetCommandLineW(), SW_SHOWDEFAULT);
+    QApplication app(argc, argv);
+    app.setApplicationName(QStringLiteral("Wols Password Generator"));
+    app.setApplicationDisplayName(QStringLiteral("Wols Password Generator & Vault"));
+    app.setApplicationVersion(QStringLiteral("2.0.0"));
+    app.setOrganizationName(QStringLiteral("Wols"));
+
+    if (QStyleFactory::keys().contains(QStringLiteral("Fusion"))) {
+        app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+    }
+
+    gui::MainWindow mainWindow;
+    mainWindow.show();
+
+    return app.exec();
 }
-
-#else
-
-int main(int argc, char* argv[]) {
-    linux_platform::LinuxApp app;
-    return app.run(argc, argv);
-}
-
-#endif

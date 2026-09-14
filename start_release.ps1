@@ -2,6 +2,11 @@
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $scriptDir
 
+$qtDir = "C:\Qt\6.11.1\msvc2022_64\bin"
+if (Test-Path $qtDir -and -not ($env:PATH -split ';' -contains $qtDir)) {
+    $env:PATH = "$qtDir;$env:PATH"
+}
+
 $exePath = Join-Path $scriptDir "cmake-build-release\Wols_CA_PasswordGenerator.exe"
 
 if (-not (Test-Path $exePath)) {

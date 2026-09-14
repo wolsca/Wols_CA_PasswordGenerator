@@ -7,11 +7,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
-- Added `commit.ps1` PowerShell script to automate Git commits and pushes using the description from `CHANGELOG.md`.
-- Added `CHANGELOG.md` tracking all version histories, features, and changes since the latest commit.
+- **Google Chrome CSV Wachtwoorden Importeren & Veilige Bestandswisser**:
+  - Nieuwe `ChromeImporter` module voor het parsen en importeren van Google Chrome CSV-exportbestanden (conform RFC 4180).
+  - Directe on-the-fly encryptie (`AES-256-GCM`) van geïmporteerde wachtwoorden en notities met de hoofdsleutel.
+  - Automatische herkenning van kolommen (`name`, `url`, `username`, `password`, `note`), groepering in de kluis en intelligente samenvoeging van meerdere accounts per domein.
+  - Veilige bestands-wisfunctie (`ChromeImporter::wipeFile`): na de import wordt de gebruiker gevraagd of het CSV-bronbestand leeggemaakt mag worden. Bij akkoord wordt het bestand overschreven met cryptografisch willekeurige bytes en nullen, en teruggebracht naar 0 bytes (bestand behouden maar volledig leeg).
+  - Nieuwe werkbalkknop en sneltoets (`Ctrl+I`) in `VaultDialog` met speciaal vector-importicoon (`IconType::Import`).
+  - Unit tests toegevoegd aan `test_vault` voor CSV-parsing, on-the-fly encryptie/decryptie en bestandsleegmaking.
+- **UI / UX & Hotkeys (Stap 2)**:
+  - Globale sneltoetsen toegevoegd aan `MainWindow` (F5 / Ctrl+G voor genereren, Ctrl+C voor kopiëren, Ctrl+S voor opslaan in kluis, Ctrl+K / Ctrl+O voor kluis openen, Ctrl+, / F2 voor instellingen).
+  - Sneltoetsen toegevoegd aan `VaultDialog` (Ctrl+F voor zoeken, Ctrl+N voor nieuw item, Ctrl+Shift+N voor nieuwe groep, Del voor verwijderen, F2 voor hernoemen, Ctrl+S voor opslaan).
+  - Volledig vernieuwd tabbed `SettingsDialog` met drie overzichtelijke categorieën: *Generator*, *Cloud & Opslag*, en *Beveiliging & Biometrie*.
+  - Duidelijke interactieve tooltips en iconen met actieve focus- en statusaanduidingen.
+- **Windows Hello & Biometrische Beveiliging (Stap 3)**:
+  - Nieuwe `BiometricAuth` core module via Windows Credential UI / Hello API (`credui.lib`).
+  - Configureerbare biometrische authenticatiepoorten voor:
+    - Wachtwoord tonen (*Hold to Reveal*).
+    - Wachtwoord kopiëren naar het klembord.
+    - Openen van de wachtwoordkluis.
+- **Cloud Synchronisatie & Multiplatform (Stap 4 - OneDrive & Google Drive focus)**:
+  - Automatische detectie en padresolutie voor **Microsoft OneDrive** (`%OneDrive%`, `%OneDriveConsumer%`, `%OneDriveCommercial%`, Documents subfolder).
+  - Automatische detectie voor **Google Drive Desktop** (virtuele stations `G:\My Drive` / `G:\Mijn Drive` en gebruikersprofielen).
+  - Veilige kluismigratiefunctie (`VaultStorage::migrateVault`) met dialoogvenster om bestaande kluizen direct over te zetten bij het wijzigen van de opslaglocatie.
+- **Kwaliteitsborging & Tests (Stap 1)**:
+  - Unit test suite `test_vault` uitgebreid met automatische verificatie van cloudprovider-resolutie, kluismigratie, biometrische instellingen en JSON-serialisatie.
+  - Release deployment pipeline geverifieerd via `rebuild_Release.ps1`.
 
-### Changed
-- Updated `README.md` with documentation and usage instructions for `commit.ps1` and `CHANGELOG.md`.
+### Fixed
+- Weergave van corrupte knopteksten (`ðŸ”„`, `ðŸ”‹`, `âš™`) opgelost door `/utf-8` compiler-optie in te stellen in `CMakeLists.txt` en universele Unicode tekens te gebruiken voor de Generate-, Copy- en Settings-knoppen.
+- Systeemvak- en dialoogiconen tonen nu direct het officiële applicatie-icoon in plaats van de standaard Windows placeholder.
 
 ---
 

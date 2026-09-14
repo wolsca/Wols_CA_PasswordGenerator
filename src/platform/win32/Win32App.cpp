@@ -53,8 +53,8 @@ int Win32App::run(HINSTANCE hInstance, int nCmdShow) {
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
     wc.lpszClassName = CLASS_NAME;
-    wc.hIcon = LoadIcon(NULL, IDI_APPLICATION);
-    wc.hIconSm = LoadIcon(NULL, IDI_APPLICATION);
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
+    wc.hIconSm = (HICON)LoadImage(hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
 
     if (!RegisterClassExW(&wc)) {
         return 0;
@@ -161,6 +161,12 @@ LRESULT CALLBACK Win32App::MainWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPAR
 void Win32App::onCreate(HWND hWnd) {
     m_hWnd = hWnd;
 
+    // Set window icons
+    HICON hIconBig = (HICON)LoadImage(m_hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXICON), GetSystemMetrics(SM_CYICON), LR_DEFAULTCOLOR);
+    HICON hIconSm = (HICON)LoadImage(m_hInstance, MAKEINTRESOURCE(IDI_APP_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+    if (hIconBig) SendMessage(hWnd, WM_SETICON, ICON_BIG, (LPARAM)hIconBig);
+    if (hIconSm) SendMessage(hWnd, WM_SETICON, ICON_SMALL, (LPARAM)hIconSm);
+
     // Fonts
     m_hFontNormal = CreateFontW(-13, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
                                 DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
@@ -194,7 +200,7 @@ void Win32App::onCreate(HWND hWnd) {
     
     // Refresh (Generate) button with icon
     m_hBtnRefresh = CreateWindowExW(
-        0, L"BUTTON", L"🔄 Generate",
+        0, L"BUTTON", L"\x21BB Generate",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
         x, y, 130, 34, hWnd, (HMENU)IDC_MAIN_BTN_REFRESH, m_hInstance, NULL
     );
@@ -202,7 +208,7 @@ void Win32App::onCreate(HWND hWnd) {
 
     // Copy button with icon
     m_hBtnCopy = CreateWindowExW(
-        0, L"BUTTON", L"📋 Copy",
+        0, L"BUTTON", L"\xD83D\xDCCB Copy",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
         x + 140, y, 110, 34, hWnd, (HMENU)IDC_MAIN_BTN_COPY, m_hInstance, NULL
     );
@@ -210,7 +216,7 @@ void Win32App::onCreate(HWND hWnd) {
 
     // Settings button
     m_hBtnSettings = CreateWindowExW(
-        0, L"BUTTON", L"⚙ Settings...",
+        0, L"BUTTON", L"\x2699 Settings...",
         WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON | WS_TABSTOP,
         x + 365, y, 120, 34, hWnd, (HMENU)IDC_MAIN_BTN_SETTINGS, m_hInstance, NULL
     );
@@ -331,7 +337,8 @@ void Win32App::onSize(HWND hWnd, UINT state, int cx, int cy) {
     if (state == SIZE_MINIMIZED) {
         // Minimize to System Tray
         ShowWindow(hWnd, SW_HIDE);
-        m_tray.init(hWnd, WM_APP_TRAYMSG, LoadIcon(NULL, IDI_APPLICATION), L"Password Generator");
+        HICON hTrayIcon = (HICON)LoadImage(m_hInstance, MAKEINTRESOURCE(IDI_TRAY_ICON), IMAGE_ICON, GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR);
+        m_tray.init(hWnd, WM_APP_TRAYMSG, hTrayIcon ? hTrayIcon : LoadIcon(m_hInstance, MAKEINTRESOURCE(IDI_APP_ICON)), L"Password Generator");
     }
 }
 
