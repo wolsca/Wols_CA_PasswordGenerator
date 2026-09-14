@@ -300,6 +300,71 @@ void testChromeImporter() {
     std::cout << "  -> ChromeImporter CSV parser, encryption, and file wiping passed!" << std::endl;
 }
 
+void testLocalConfigAndPlatforms() {
+    std::cout << "[TEST] Testing Local OS config JSON, multi-platform configs, and OneDrive detection..." << std::endl;
+
+    QString configPath = core::VaultStorage::getLocalConfigPath();
+    assert(!configPath.isEmpty());
+    assert(configPath.endsWith("config.json"));
+
+    // Test platform config string generation
+    core::VaultSettings settings;
+    settings.lastGeneratorLength = 24;
+    settings.preferredProvider = core::CloudProvider::OneDrive;
+    settings.selectedOneDriveDir = "C:/Users/Test/OneDrive - Personal";
+
+    QString winJson = core::VaultStorage::generatePlatformConfigJsonString("windows", "C:/Vault/vault.json", core::CloudProvider::OneDrive, settings.selectedOneDriveDir, settings);
+    assert(winJson.contains("Windows"));
+    assert(winJson.contains("OneDrive - Personal"));
+    assert(winJson.contains("active_vault_path"));
+
+    QString linuxJson = core::VaultStorage::generatePlatformConfigJsonString("linux", "~/OneDrive/vault.json", core::CloudProvider::OneDrive, QString(), settings);
+    assert(linuxJson.contains("Linux"));
+    assert(linuxJson.contains("~/.config/wols_password_generator/config.json"));
+
+    QString androidJson = core::VaultStorage::generatePlatformConfigJsonString("android", "/storage/emulated/0/Documents/vault.json", core::CloudProvider::OneDrive, QString(), settings);
+    assert(androidJson.contains("Android"));
+    assert(androidJson.contains("/storage/emulated/0/Documents/WolsPasswordManager/config.json"));
+
+    QString allJson = core::VaultStorage::generatePlatformConfigJsonString("all", "C:/Vault/vault.json", core::CloudProvider::OneDrive, settings.selectedOneDriveDir, settings);
+    assert(allJson.contains("windows"));
+    assert(allJson.contains("linux"));
+    assert(allJson.contains("android"));
+
+    // Test saving and loading local config
+    QString testVaultPath = "C:/TestLocation/vault.json";
+    QString err;
+    bool saveConfigOk = core::VaultStorage::saveLocalConfig(testVaultPath, core::CloudProvider::OneDrive, settings.selectedOneDriveDir, settings, &err);
+    assert(saveConfigOk);
+    assert(QFile::exists(configPath));
+
+    QString loadedVaultPath;
+    core::CloudProvider loadedProv = core::CloudProvider::Local;
+    QString loadedSelectedOD;
+    core::VaultSettings loadedSettings;
+    bool loadConfigOk = core::VaultStorage::loadLocalConfig(loadedVaultPath, loadedProv, loadedSelectedOD, loadedSettings, &err);
+    assert(loadConfigOk);
+    assert(loadedVaultPath == testVaultPath);
+    assert(loadedProv == core::CloudProvider::OneDrive);
+    assert(loadedSelectedOD == "C:/Users/Test/OneDrive - Personal");
+    assert(loadedSettings.lastGeneratorLength == 24);
+
+    // Test OneDrive and Google Drive detection list
+    QStringList availableOD = core::VaultStorage::getAvailableOneDriveDirectories();
+    std::cout << "  -> Detected " << availableOD.size() << " OneDrive location(s) on current machine." << std::endl;
+
+    QStringList availableGD = core::VaultStorage::getAvailableGoogleDriveDirectories();
+    std::cout << "  -> Detected " << availableGD.size() << " Google Drive location(s) on current machine." << std::endl;
+
+    // Test findExistingVault logic
+    core::CloudProvider detectedProv;
+    QString detectedODDir;
+    QString existingVault = core::VaultStorage::findExistingVault(&detectedProv, &detectedODDir);
+    std::cout << "  -> findExistingVault result: " << (existingVault.isEmpty() ? "None (clean system)" : existingVault.toStdString()) << std::endl;
+
+    std::cout << "  -> Local OS config JSON, multi-platform configs, and Cloud detection passed!" << std::endl;
+}
+
 int main(int argc, char* argv[]) {
     std::cout << "========================================" << std::endl;
     std::cout << "   RUNNING VAULT UNIT TESTS             " << std::endl;
@@ -308,6 +373,7 @@ int main(int argc, char* argv[]) {
     testVaultModel();
     testVaultCrypto();
     testVaultStorage();
+    testLocalConfigAndPlatforms();
     testBiometricAuth();
     testChromeImporter();
 

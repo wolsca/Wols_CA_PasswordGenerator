@@ -175,6 +175,11 @@ QPixmap IconUtils::getPixmap(IconType type, const QColor& color, int size) {
         p.drawPolygon(arrow);
         break;
     }
+    case IconType::Cancel: {
+        p.drawLine(QPointF(s * 0.26, s * 0.26), QPointF(s * 0.74, s * 0.74));
+        p.drawLine(QPointF(s * 0.74, s * 0.26), QPointF(s * 0.26, s * 0.74));
+        break;
+    }
     }
 
     return pixmap;

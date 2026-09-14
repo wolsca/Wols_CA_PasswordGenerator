@@ -90,11 +90,27 @@ void AccountEditDialog::setupUi() {
         m_editPassword->setText(QString::fromStdString(generated));
     });
 
-    // Button box
-    QDialogButtonBox* buttonBox = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    mainLayout->addWidget(buttonBox);
+    // Action buttons: Cancel & Save icon buttons
+    QHBoxLayout* btnLayout = new QHBoxLayout();
+    btnLayout->addStretch();
 
-    connect(buttonBox, &QDialogButtonBox::accepted, this, [this]() {
+    QToolButton* btnCancel = new QToolButton(this);
+    btnCancel->setIcon(IconUtils::getIcon(IconType::Cancel, QColor(220, 50, 50)));
+    btnCancel->setIconSize(QSize(22, 22));
+    btnCancel->setToolTip(QStringLiteral("Annuleren (Cancel)"));
+    btnCancel->setAutoRaise(true);
+    btnLayout->addWidget(btnCancel);
+
+    QToolButton* btnSave = new QToolButton(this);
+    btnSave->setIcon(IconUtils::getIcon(IconType::Save, QColor(40, 167, 69)));
+    btnSave->setIconSize(QSize(22, 22));
+    btnSave->setToolTip(QStringLiteral("Opslaan (Save)"));
+    btnSave->setAutoRaise(true);
+    btnLayout->addWidget(btnSave);
+
+    mainLayout->addLayout(btnLayout);
+
+    connect(btnSave, &QToolButton::clicked, this, [this]() {
         if (m_editLabel->text().trimmed().isEmpty() && 
             m_editUsername->text().trimmed().isEmpty() && 
             m_editEmail->text().trimmed().isEmpty()) {
@@ -104,7 +120,7 @@ void AccountEditDialog::setupUi() {
         }
         accept();
     });
-    connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
+    connect(btnCancel, &QToolButton::clicked, this, &QDialog::reject);
 }
 
 core::AccountEntry AccountEditDialog::getAccount() const {

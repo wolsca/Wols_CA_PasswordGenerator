@@ -204,7 +204,7 @@ void MainWindow::setupUi() {
             m_options = newSettings.toPasswordOptions();
             m_vaultDoc.settings = newSettings;
 
-            QString newPath = core::VaultStorage::resolveVaultPath(newSettings.preferredProvider, newSettings.customVaultPath);
+            QString newPath = core::VaultStorage::resolveVaultPath(newSettings.preferredProvider, newSettings.customVaultPath, newSettings.selectedOneDriveDir);
             if (newPath != m_vaultPath) {
                 if (QFile::exists(m_vaultPath) && !QFile::exists(newPath)) {
                     auto ret = QMessageBox::question(this, QStringLiteral("Kluis Verplaatsen"),
@@ -296,14 +296,95 @@ void MainWindow::setupUi() {
 }
 
 void MainWindow::loadVaultAndSettings() {
-    m_vaultPath = core::VaultStorage::getDefaultVaultPath();
-    m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+    QString configVaultPath;
+    core::CloudProvider provider = core::CloudProvider::OneDrive;
+    QString selectedOneDriveDir;
+    core::VaultSettings localSettings;
 
-    // Resolve based on saved preferred cloud provider
-    QString resolved = core::VaultStorage::resolveVaultPath(m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.customVaultPath);
-    if (resolved != m_vaultPath && QFile::exists(resolved)) {
-        m_vaultPath = resolved;
+    bool hasLocalConfig = core::VaultStorage::loadLocalConfig(configVaultPath, provider, selectedOneDriveDir, localSettings);
+
+    // Scan for any existing populated vault file (in Google Drive, OneDrive, or Local Documents)
+    core::CloudProvider detectedProvider = core::CloudProvider::OneDrive;
+    QString detectedOneDriveDir;
+    QString existingVault = core::VaultStorage::findExistingVault(&detectedProvider, &detectedOneDriveDir);
+
+    if (hasLocalConfig && !configVaultPath.isEmpty() && QFile::exists(configVaultPath)) {
+        m_vaultPath = configVaultPath;
         m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+        m_vaultDoc.settings = localSettings;
+        if (!selectedOneDriveDir.isEmpty()) {
+            m_vaultDoc.settings.selectedOneDriveDir = selectedOneDriveDir;
+        }
+
+        // If configured vault file is completely empty/uninitialized, but an existing populated vault was found elsewhere (e.g. Google Drive)
+        if (m_vaultDoc.kdfSalt.isEmpty() && m_vaultDoc.groups.isEmpty() && !existingVault.isEmpty() && existingVault != configVaultPath) {
+            m_vaultPath = existingVault;
+            m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+            m_vaultDoc.settings.preferredProvider = detectedProvider;
+            if (!detectedOneDriveDir.isEmpty()) {
+                m_vaultDoc.settings.selectedOneDriveDir = detectedOneDriveDir;
+            }
+            core::VaultStorage::saveLocalConfig(m_vaultPath, m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.selectedOneDriveDir, m_vaultDoc.settings);
+        }
+    } else if (!existingVault.isEmpty()) {
+        // An existing vault was found on disk (e.g. in Google Drive or OneDrive)
+        m_vaultPath = existingVault;
+        m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+        if (hasLocalConfig) {
+            m_vaultDoc.settings = localSettings;
+        }
+        m_vaultDoc.settings.preferredProvider = detectedProvider;
+        if (!detectedOneDriveDir.isEmpty()) {
+            m_vaultDoc.settings.selectedOneDriveDir = detectedOneDriveDir;
+        }
+        core::VaultStorage::saveLocalConfig(m_vaultPath, m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.selectedOneDriveDir, m_vaultDoc.settings);
+    } else if (hasLocalConfig) {
+        // Local config exists but active vault path needs resolution
+        m_vaultDoc.settings = localSettings;
+        if (!selectedOneDriveDir.isEmpty()) {
+            m_vaultDoc.settings.selectedOneDriveDir = selectedOneDriveDir;
+        }
+        m_vaultPath = core::VaultStorage::resolveVaultPath(provider, localSettings.customVaultPath, m_vaultDoc.settings.selectedOneDriveDir);
+        m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+        m_vaultDoc.settings = localSettings;
+        core::VaultStorage::saveLocalConfig(m_vaultPath, m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.selectedOneDriveDir, m_vaultDoc.settings);
+    } else {
+        // Startup resolution sequence for new setup without existing vault:
+        // 1. Check Google Drive if available
+        if (core::VaultStorage::isCloudPathAvailable(core::CloudProvider::GoogleDrive)) {
+            m_vaultDoc.settings.preferredProvider = core::CloudProvider::GoogleDrive;
+            m_vaultPath = core::VaultStorage::getGoogleDriveVaultPath();
+            m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+        } else {
+            // 2. Check OneDrive(s)
+            QStringList availableOneDrives = core::VaultStorage::getAvailableOneDriveDirectories();
+            if (availableOneDrives.size() > 1) {
+                bool ok = false;
+                QString chosen = QInputDialog::getItem(this, QStringLiteral("Selecteer OneDrive Account"),
+                    QStringLiteral("Er zijn meerdere OneDrive locaties gedetecteerd op dit systeem.\nKies welke OneDrive map u wilt gebruiken voor synchronisatie:"),
+                    availableOneDrives, 0, false, &ok);
+                if (ok && !chosen.isEmpty()) {
+                    selectedOneDriveDir = chosen;
+                }
+            } else if (!availableOneDrives.isEmpty()) {
+                selectedOneDriveDir = availableOneDrives.first();
+            }
+
+            if (!availableOneDrives.isEmpty()) {
+                m_vaultDoc.settings.preferredProvider = core::CloudProvider::OneDrive;
+                m_vaultDoc.settings.selectedOneDriveDir = selectedOneDriveDir;
+                m_vaultPath = core::VaultStorage::getOneDriveVaultPath(selectedOneDriveDir);
+                m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+            } else {
+                // 3. Fallback to Local Documents
+                m_vaultDoc.settings.preferredProvider = core::CloudProvider::Local;
+                m_vaultPath = core::VaultStorage::getLocalVaultPath();
+                m_vaultDoc = core::VaultStorage::loadVault(m_vaultPath);
+            }
+        }
+
+        // Save initial local configuration file in user directory
+        core::VaultStorage::saveLocalConfig(m_vaultPath, m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.selectedOneDriveDir, m_vaultDoc.settings);
     }
 
     m_options = m_vaultDoc.settings.toPasswordOptions();
@@ -315,6 +396,7 @@ void MainWindow::saveSettingsToVault() {
     m_vaultDoc.settings.fromPasswordOptions(m_options);
     m_vaultDoc.lastSynced = QDateTime::currentDateTimeUtc();
     core::VaultStorage::saveVault(m_vaultPath, m_vaultDoc);
+    core::VaultStorage::saveLocalConfig(m_vaultPath, m_vaultDoc.settings.preferredProvider, m_vaultDoc.settings.selectedOneDriveDir, m_vaultDoc.settings);
 }
 
 bool MainWindow::unlockVaultIfNeeded() {

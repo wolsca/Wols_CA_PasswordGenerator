@@ -10,6 +10,9 @@
 #include <QButtonGroup>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QApplication>
+#include <QClipboard>
+#include <QMessageBox>
 
 namespace gui {
 
@@ -31,6 +34,7 @@ void SettingsDialog::setupUi() {
     setupGeneratorTab(tabs);
     setupStorageTab(tabs);
     setupSecurityTab(tabs);
+    setupPlatformConfigTab(tabs);
     mainLayout->addWidget(tabs);
 
     // Dialog buttons
@@ -41,6 +45,7 @@ void SettingsDialog::setupUi() {
     connect(buttonBox, &QDialogButtonBox::rejected, this, &QDialog::reject);
 
     updateUiState();
+    updatePlatformConfigView();
 }
 
 void SettingsDialog::setupGeneratorTab(QTabWidget* tabs) {
@@ -165,17 +170,34 @@ void SettingsDialog::setupStorageTab(QTabWidget* tabs) {
     QButtonGroup* provBtnGroup = new QButtonGroup(providerGroup);
 
     // 1. OneDrive
-    QString oneDriveDir = core::VaultStorage::getOneDriveDirectory();
-    bool oneDriveAvail = !oneDriveDir.isEmpty();
+    QStringList availableOneDrives = core::VaultStorage::getAvailableOneDriveDirectories();
+    bool oneDriveAvail = !availableOneDrives.isEmpty();
     m_rbOneDrive = new QRadioButton(QStringLiteral("Microsoft OneDrive (Aanbevolen voor cloud sync)"), providerGroup);
     provBtnGroup->addButton(m_rbOneDrive);
     provLayout->addWidget(m_rbOneDrive);
 
     m_lblOneDriveStatus = new QLabel(providerGroup);
     m_lblOneDriveStatus->setStyleSheet(oneDriveAvail ? "color: #28a745; margin-left: 22px;" : "color: #888; margin-left: 22px;");
-    m_lblOneDriveStatus->setText(oneDriveAvail ? QStringLiteral("✓ Gedetecteerd: ") + oneDriveDir 
+    m_lblOneDriveStatus->setText(oneDriveAvail ? QStringLiteral("✓ Gedetecteerd (%1 account(s))").arg(availableOneDrives.size()) 
                                               : QStringLiteral("✕ Niet gedetecteerd op dit systeem"));
     provLayout->addWidget(m_lblOneDriveStatus);
+
+    if (oneDriveAvail) {
+        QHBoxLayout* odSelectLayout = new QHBoxLayout();
+        odSelectLayout->setContentsMargins(22, 0, 0, 0);
+        QLabel* odLabel = new QLabel(QStringLiteral("OneDrive account/map:"), providerGroup);
+        m_comboOneDriveAccounts = new QComboBox(providerGroup);
+        for (const QString& d : availableOneDrives) {
+            m_comboOneDriveAccounts->addItem(d);
+        }
+        if (!m_settings.selectedOneDriveDir.isEmpty()) {
+            int idx = m_comboOneDriveAccounts->findText(m_settings.selectedOneDriveDir);
+            if (idx >= 0) m_comboOneDriveAccounts->setCurrentIndex(idx);
+        }
+        odSelectLayout->addWidget(odLabel);
+        odSelectLayout->addWidget(m_comboOneDriveAccounts, 1);
+        provLayout->addLayout(odSelectLayout);
+    }
 
     // 2. Google Drive
     QString gDriveDir = core::VaultStorage::getGoogleDriveDirectory();
@@ -249,13 +271,21 @@ void SettingsDialog::setupStorageTab(QTabWidget* tabs) {
         else if (m_rbGoogleDrive->isChecked()) p = core::CloudProvider::GoogleDrive;
         else if (m_rbCustom->isChecked()) p = core::CloudProvider::Custom;
 
-        QString path = core::VaultStorage::resolveVaultPath(p, m_editCustomPath->text());
+        QString selectedOD = m_comboOneDriveAccounts ? m_comboOneDriveAccounts->currentText() : QString();
+        QString path = core::VaultStorage::resolveVaultPath(p, m_editCustomPath->text(), selectedOD);
         m_lblResolvedPath->setText(path);
         m_editCustomPath->setEnabled(m_rbCustom->isChecked());
         m_btnBrowseCustom->setEnabled(m_rbCustom->isChecked());
+        if (m_comboOneDriveAccounts) {
+            m_comboOneDriveAccounts->setEnabled(m_rbOneDrive->isChecked());
+        }
+        updatePlatformConfigView();
     };
 
     connect(m_rbOneDrive, &QRadioButton::toggled, this, updateResolvedLabel);
+    if (m_comboOneDriveAccounts) {
+        connect(m_comboOneDriveAccounts, &QComboBox::currentTextChanged, this, updateResolvedLabel);
+    }
     connect(m_rbGoogleDrive, &QRadioButton::toggled, this, updateResolvedLabel);
     connect(m_rbLocal, &QRadioButton::toggled, this, updateResolvedLabel);
     connect(m_rbCustom, &QRadioButton::toggled, this, updateResolvedLabel);
@@ -319,6 +349,96 @@ void SettingsDialog::setupSecurityTab(QTabWidget* tabs) {
     tabs->addTab(secWidget, QStringLiteral("Beveiliging & Biometrie"));
 }
 
+void SettingsDialog::setupPlatformConfigTab(QTabWidget* tabs) {
+    QWidget* platWidget = new QWidget(tabs);
+    QVBoxLayout* platLayout = new QVBoxLayout(platWidget);
+    platLayout->setSpacing(10);
+
+    // Info header
+    QGroupBox* localConfigBox = new QGroupBox(QStringLiteral("Lokale OS Configuratiebestand"), platWidget);
+    QVBoxLayout* lcLayout = new QVBoxLayout(localConfigBox);
+    m_lblLocalConfigPath = new QLabel(localConfigBox);
+    m_lblLocalConfigPath->setText(QString("<b>Pad in OS User Directory:</b><br>%1").arg(core::VaultStorage::getLocalConfigPath()));
+    m_lblLocalConfigPath->setWordWrap(true);
+    m_lblLocalConfigPath->setStyleSheet("color: #1e293b; font-size: 11px;");
+    lcLayout->addWidget(m_lblLocalConfigPath);
+    platLayout->addWidget(localConfigBox);
+
+    // Platform Selector & Copy Tools
+    QHBoxLayout* selLayout = new QHBoxLayout();
+    QLabel* lblSel = new QLabel(QStringLiteral("Doelplatform / Config:"), platWidget);
+    lblSel->setStyleSheet("font-weight: bold;");
+    m_comboPlatformSelect = new QComboBox(platWidget);
+    m_comboPlatformSelect->addItem(QStringLiteral("Alle Platforms (Volledige Config)"), "all");
+    m_comboPlatformSelect->addItem(QStringLiteral("Windows"), "windows");
+    m_comboPlatformSelect->addItem(QStringLiteral("Linux"), "linux");
+    m_comboPlatformSelect->addItem(QStringLiteral("Android"), "android");
+    selLayout->addWidget(lblSel);
+    selLayout->addWidget(m_comboPlatformSelect, 1);
+
+    QToolButton* btnCopyConfig = new QToolButton(platWidget);
+    btnCopyConfig->setIcon(IconUtils::getIcon(IconType::Copy, QColor(0, 122, 255)));
+    btnCopyConfig->setText(QStringLiteral(" Kopiëren"));
+    btnCopyConfig->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    btnCopyConfig->setToolTip(QStringLiteral("Kopieer de gegenereerde JSON configuratie naar het klembord"));
+    selLayout->addWidget(btnCopyConfig);
+
+    QToolButton* btnExportConfig = new QToolButton(platWidget);
+    btnExportConfig->setIcon(IconUtils::getIcon(IconType::Save, QColor(40, 167, 69)));
+    btnExportConfig->setText(QStringLiteral(" Exporteren..."));
+    btnExportConfig->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    btnExportConfig->setToolTip(QStringLiteral("Exporteer configuratie als config.json bestand"));
+    selLayout->addWidget(btnExportConfig);
+
+    platLayout->addLayout(selLayout);
+
+    m_txtPlatformConfig = new QPlainTextEdit(platWidget);
+    m_txtPlatformConfig->setReadOnly(true);
+    m_txtPlatformConfig->setStyleSheet("font-family: 'Consolas', 'Courier New', monospace; font-size: 11px; background-color: #f8fafc; border: 1px solid #cbd5e1; border-radius: 4px;");
+    platLayout->addWidget(m_txtPlatformConfig, 1);
+
+    tabs->addTab(platWidget, QStringLiteral("Platform Configs"));
+
+    connect(m_comboPlatformSelect, &QComboBox::currentIndexChanged, this, [this]() {
+        updatePlatformConfigView();
+    });
+
+    connect(btnCopyConfig, &QToolButton::clicked, this, [this]() {
+        QApplication::clipboard()->setText(m_txtPlatformConfig->toPlainText());
+        QMessageBox::information(this, QStringLiteral("Gekopieerd"), QStringLiteral("De platformconfiguratie is naar het klembord gekopieerd."));
+    });
+
+    connect(btnExportConfig, &QToolButton::clicked, this, [this]() {
+        QString defaultName = "config.json";
+        QString file = QFileDialog::getSaveFileName(this, QStringLiteral("Configuratie Exporteren"), 
+                                                   defaultName, QStringLiteral("JSON Configuratie (*.json);;Alle bestanden (*.*)"));
+        if (!file.isEmpty()) {
+            QFile outFile(file);
+            if (outFile.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                outFile.write(m_txtPlatformConfig->toPlainText().toUtf8());
+                outFile.close();
+                QMessageBox::information(this, QStringLiteral("Opgeslagen"), QStringLiteral("Configuratiebestand succesvol opgeslagen."));
+            } else {
+                QMessageBox::warning(this, QStringLiteral("Fout"), QStringLiteral("Kan bestand niet opslaan: ") + outFile.errorString());
+            }
+        }
+    });
+}
+
+void SettingsDialog::updatePlatformConfigView() {
+    if (!m_txtPlatformConfig || !m_comboPlatformSelect) return;
+
+    core::VaultSettings current = getSettings();
+    QString targetPlat = m_comboPlatformSelect->currentData().toString();
+    if (targetPlat.isEmpty()) targetPlat = "all";
+
+    QString selectedOD = m_comboOneDriveAccounts ? m_comboOneDriveAccounts->currentText() : current.selectedOneDriveDir;
+    QString activeVault = core::VaultStorage::resolveVaultPath(current.preferredProvider, current.customVaultPath, selectedOD);
+
+    QString jsonStr = core::VaultStorage::generatePlatformConfigJsonString(targetPlat, activeVault, current.preferredProvider, selectedOD, current);
+    m_txtPlatformConfig->setPlainText(jsonStr);
+}
+
 void SettingsDialog::updateUiState() {
     bool hex = m_chkHexOnly->isChecked();
     m_rbHexUpper->setEnabled(hex);
@@ -335,6 +455,8 @@ void SettingsDialog::updateUiState() {
 
     bool sig = m_chkSignature->isChecked();
     m_spinSigPos->setEnabled(sig);
+
+    updatePlatformConfigView();
 }
 
 core::PasswordOptions SettingsDialog::getOptions() const {
@@ -365,6 +487,9 @@ core::VaultSettings SettingsDialog::getSettings() const {
     else s.preferredProvider = core::CloudProvider::Local;
 
     s.customVaultPath = m_editCustomPath->text().trimmed();
+    if (m_comboOneDriveAccounts) {
+        s.selectedOneDriveDir = m_comboOneDriveAccounts->currentText().trimmed();
+    }
 
     s.requireBiometricsForReveal = m_chkBioReveal->isChecked();
     s.requireBiometricsForCopy = m_chkBioCopy->isChecked();

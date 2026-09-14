@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Added
+- **Automatische Google Drive & Bestaande Kluis Detectie bij Opstarten**:
+  - Uitgebreide scan over alle virtuele stations (`D:` t/m `Z:` naar `My Drive`, `Mijn Drive`, `Google Drive`) en CloudStorage-locaties via `VaultStorage::getAvailableGoogleDriveDirectories()`.
+  - Intelligente kluisdetectie (`VaultStorage::findExistingVault`): controleert bij opstarten of er al een bestaand en gevuld `vault.json` bestand aanwezig is (in Google Drive, OneDrive of lokaal) en stelt deze direct in als actieve kluislocatie.
+  - Automatische synchronisatie van alle instellingen naar het gevonden cloud-bestand en het lokale OS-configuratiebestand (`config.json`).
+- **Lokale OS Configuratie JSON & Cross-Platform Export (Windows / Linux / Android)**:
+  - Altijd een lokaal `config.json` bestand in de user directory van het OS (`%USERPROFILE%/.wols_password_generator/config.json` / `~/.wols_password_generator/config.json`).
+  - Cross-platform export en configuratiesjablonen gegenereerd voor **Windows**, **Linux** en **Android**, zodat configuraties direct gekopieerd of geëxporteerd kunnen worden.
+  - Nieuw tabblad **Platform Configs** in `SettingsDialog` met realtime weergave van de JSON-configuratie, doelplatformselectie, klembordkopieerknop en bestands-exportmogelijkheid.
+  - Bij het opstarten wordt eerst naar de lokale gebruikersdirectory gekeken voor de configuratie en kluis, vervolgens naar OneDrive (met accountkeuze bij meerdere accounts) en Google Drive.
+- **Meervoudige OneDrive Accountdetectie & Selectie**:
+  - Automatische detectie van alle aanwezige OneDrive-accounts en -mappen (`OneDrive`, `OneDrive - Personal`, `OneDrive - Zakelijk`, etc.).
+  - Keuzemenu in `SettingsDialog` en opstartdialoogvenster om bij meerdere OneDrives direct de gewenste accountmap te selecteren.
+- **Inline Bewerkbare Kaarten & Schone Weergave (`VaultDialog` & `AccountEditDialog`)**:
+  - Weergavemodus toont uitsluitend ingevulde velden (gebruikersnaam, e-mailadres, wachtwoord, URL, notities) voor een rustig en overzichtelijk beeld.
+  - Inline bewerkingsmodus voor zowel items als individuele accounts met alle invoervelden direct beschikbaar.
+  - Icon-only actieknoppen voor Opslaan (`IconType::Save` disk-icoon) en Annuleren (`IconType::Cancel` kruis-icoon) met duidelijke tooltips.
+  - Geïntegreerde wachtwoordgenerator en hold-to-reveal functie direct binnen de accountkaart in bewerkingsmodus.
 - **Google Chrome CSV Wachtwoorden Importeren & Veilige Bestandswisser**:
   - Nieuwe `ChromeImporter` module voor het parsen en importeren van Google Chrome CSV-exportbestanden (conform RFC 4180).
   - Directe on-the-fly encryptie (`AES-256-GCM`) van geïmporteerde wachtwoorden en notities met de hoofdsleutel.

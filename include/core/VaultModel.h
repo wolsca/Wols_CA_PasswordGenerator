@@ -82,6 +82,7 @@ struct VaultSettings {
     // Cloud storage preferences
     CloudProvider preferredProvider = CloudProvider::OneDrive;
     QString customVaultPath;
+    QString selectedOneDriveDir;
 
     PasswordOptions toPasswordOptions() const;
     void fromPasswordOptions(const PasswordOptions& options);

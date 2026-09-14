@@ -23,7 +23,8 @@ enum class IconType {
     Key,
     User,
     Mail,
-    Import
+    Import,
+    Cancel
 };
 
 class IconUtils {

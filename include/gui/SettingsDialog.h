@@ -8,6 +8,8 @@
 #include <QTabWidget>
 #include <QLabel>
 #include <QToolButton>
+#include <QComboBox>
+#include <QPlainTextEdit>
 #include "core/PasswordOptions.h"
 #include "core/VaultModel.h"
 
@@ -26,7 +28,9 @@ private:
     void setupGeneratorTab(QTabWidget* tabs);
     void setupStorageTab(QTabWidget* tabs);
     void setupSecurityTab(QTabWidget* tabs);
+    void setupPlatformConfigTab(QTabWidget* tabs);
     void updateUiState();
+    void updatePlatformConfigView();
 
     core::VaultSettings m_settings;
 
@@ -49,6 +53,7 @@ private:
 
     // Cloud / Storage widgets
     QRadioButton* m_rbOneDrive = nullptr;
+    QComboBox* m_comboOneDriveAccounts = nullptr;
     QRadioButton* m_rbGoogleDrive = nullptr;
     QRadioButton* m_rbLocal = nullptr;
     QRadioButton* m_rbCustom = nullptr;
@@ -63,6 +68,11 @@ private:
     QCheckBox* m_chkBioCopy = nullptr;
     QCheckBox* m_chkBioVault = nullptr;
     QLabel* m_lblBioStatus = nullptr;
+
+    // Cross-Platform Config widgets
+    QComboBox* m_comboPlatformSelect = nullptr;
+    QPlainTextEdit* m_txtPlatformConfig = nullptr;
+    QLabel* m_lblLocalConfigPath = nullptr;
 };
 
 } // namespace gui

@@ -47,11 +47,15 @@ private:
     QByteArray m_masterKey;
     core::VaultDocument m_vaultDoc;
     bool m_modified = false;
+    int m_editingAccountIndex = -1; // -1: none, -2: new account, >=0: account index
+    bool m_editingItem = false;
 
     // UI elements
     QLineEdit* m_searchEdit = nullptr;
     QTreeWidget* m_treeWidget = nullptr;
     QWidget* m_rightPanel = nullptr;
+    QWidget* m_itemHeaderContainer = nullptr;
+    QVBoxLayout* m_itemHeaderLayout = nullptr;
     QLabel* m_itemTitleLabel = nullptr;
     QLabel* m_itemDetailsLabel = nullptr;
     QVBoxLayout* m_accountsLayout = nullptr;

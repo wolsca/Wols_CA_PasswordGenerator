@@ -5,8 +5,11 @@
 #include "core/VaultStorage.h"
 #include "core/BiometricAuth.h"
 #include "core/ChromeImporter.h"
+#include "core/PasswordGenerator.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QFormLayout>
+#include <QCheckBox>
 #include <QScrollArea>
 #include <QFrame>
 #include <QInputDialog>
@@ -113,24 +116,14 @@ void VaultDialog::setupUi() {
     m_rightPanel = new QWidget(splitter);
     QVBoxLayout* rightLayout = new QVBoxLayout(m_rightPanel);
     rightLayout->setContentsMargins(10, 0, 0, 0);
+    rightLayout->setSpacing(8);
 
-    // Header info
-    QHBoxLayout* itemHeaderLayout = new QHBoxLayout();
-    m_itemTitleLabel = new QLabel(QStringLiteral("Selecteer een item"), m_rightPanel);
-    m_itemTitleLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #1a73e8;");
-    itemHeaderLayout->addWidget(m_itemTitleLabel, 1);
-
-    m_btnAddAccount = new QToolButton(m_rightPanel);
-    m_btnAddAccount->setIcon(IconUtils::getIcon(IconType::Plus, QColor(0, 122, 255)));
-    m_btnAddAccount->setToolTip(QStringLiteral("Account toevoegen aan dit item"));
-    m_btnAddAccount->setEnabled(false);
-    itemHeaderLayout->addWidget(m_btnAddAccount);
-
-    rightLayout->addLayout(itemHeaderLayout);
-
-    m_itemDetailsLabel = new QLabel(m_rightPanel);
-    m_itemDetailsLabel->setStyleSheet("color: #666; font-size: 12px;");
-    rightLayout->addWidget(m_itemDetailsLabel);
+    // Item Header Container (dynamic view or edit mode)
+    m_itemHeaderContainer = new QWidget(m_rightPanel);
+    m_itemHeaderLayout = new QVBoxLayout(m_itemHeaderContainer);
+    m_itemHeaderLayout->setContentsMargins(0, 0, 0, 0);
+    m_itemHeaderLayout->setSpacing(6);
+    rightLayout->addWidget(m_itemHeaderContainer);
 
     // Accounts Scroll area
     QScrollArea* scrollArea = new QScrollArea(m_rightPanel);
@@ -139,9 +132,8 @@ void VaultDialog::setupUi() {
 
     m_accountsContainer = new QWidget();
     m_accountsLayout = new QVBoxLayout(m_accountsContainer);
-    m_accountsLayout->setContentsMargins(0, 8, 0, 8);
+    m_accountsLayout->setContentsMargins(0, 4, 0, 4);
     m_accountsLayout->setSpacing(10);
-    m_accountsLayout->addStretch();
 
     scrollArea->setWidget(m_accountsContainer);
     rightLayout->addWidget(scrollArea, 1);
@@ -158,8 +150,9 @@ void VaultDialog::setupUi() {
     });
 
     connect(m_treeWidget, &QTreeWidget::currentItemChanged, this, [this]() {
+        m_editingAccountIndex = -1;
+        m_editingItem = false;
         core::VaultItem* item = getSelectedItem();
-        m_btnAddAccount->setEnabled(item != nullptr);
         populateAccountList(item);
     });
 
@@ -167,7 +160,6 @@ void VaultDialog::setupUi() {
     connect(m_btnAddItem, &QToolButton::clicked, this, &VaultDialog::onAddItem);
     connect(m_btnEditItem, &QToolButton::clicked, this, &VaultDialog::onEditItem);
     connect(m_btnDeleteItem, &QToolButton::clicked, this, &VaultDialog::onDeleteItem);
-    connect(m_btnAddAccount, &QToolButton::clicked, this, &VaultDialog::onAddAccount);
     connect(m_btnImport, &QToolButton::clicked, this, &VaultDialog::onImportChromeCsv);
     connect(m_btnBackup, &QToolButton::clicked, this, &VaultDialog::onRestoreBackup);
     connect(m_btnSave, &QToolButton::clicked, this, [this]() {
@@ -262,210 +254,632 @@ void VaultDialog::populateTree(const QString& filter) {
 }
 
 void VaultDialog::populateAccountList(core::VaultItem* item) {
-    // Clear old accounts widgets
-    QLayoutItem* child;
-    while ((child = m_accountsLayout->takeAt(0)) != nullptr) {
-        if (child->widget()) {
-            delete child->widget();
-        }
-        delete child;
+    // 1. Clear item header layout
+    QLayoutItem* hChild;
+    while ((hChild = m_itemHeaderLayout->takeAt(0)) != nullptr) {
+        if (hChild->widget()) delete hChild->widget();
+        delete hChild;
+    }
+
+    // 2. Clear accounts layout
+    QLayoutItem* aChild;
+    while ((aChild = m_accountsLayout->takeAt(0)) != nullptr) {
+        if (aChild->widget()) delete aChild->widget();
+        delete aChild;
     }
 
     if (!item) {
-        m_itemTitleLabel->setText(QStringLiteral("Selecteer een item"));
-        m_itemDetailsLabel->setText(QString());
+        QLabel* emptyMsg = new QLabel(QStringLiteral("Selecteer een item uit de kluisstructuur links."), m_itemHeaderContainer);
+        emptyMsg->setStyleSheet("font-size: 14px; color: #888; padding: 10px;");
+        m_itemHeaderLayout->addWidget(emptyMsg);
         m_accountsLayout->addStretch();
         return;
     }
 
-    m_itemTitleLabel->setText(item->title.isEmpty() ? QStringLiteral("(Geen titel)") : item->title);
-    QString details = QString("URL: %1 | Categorie: %2\nAangemaakt: %3 | Gewijzigd: %4 | Laatst geopend: %5")
-                      .arg(item->url.isEmpty() ? "-" : item->url,
-                           item->category.isEmpty() ? "-" : item->category,
-                           formatTimestamp(item->createdAt),
-                           formatTimestamp(item->updatedAt),
-                           formatTimestamp(item->lastAccessed));
-    m_itemDetailsLabel->setText(details);
+    // --- ITEM HEADER SECTION ---
+    if (!m_editingItem) {
+        // VIEW MODE: Show only filled item fields
+        QFrame* itemCard = new QFrame(m_itemHeaderContainer);
+        itemCard->setStyleSheet("QFrame { background-color: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; }");
+        QVBoxLayout* icLayout = new QVBoxLayout(itemCard);
+        icLayout->setSpacing(6);
 
-    if (item->accounts.isEmpty()) {
+        // Header Row: Title + Category + Edit button + Add Account button
+        QHBoxLayout* titleRow = new QHBoxLayout();
+        QLabel* titleLabel = new QLabel(item->title.isEmpty() ? QStringLiteral("(Geen titel)") : item->title, itemCard);
+        titleLabel->setStyleSheet("font-size: 16px; font-weight: bold; color: #1e293b;");
+        titleRow->addWidget(titleLabel);
+
+        if (!item->category.isEmpty()) {
+            QLabel* catBadge = new QLabel(item->category, itemCard);
+            catBadge->setStyleSheet("background-color: #e0f2fe; color: #0284c7; font-weight: bold; padding: 2px 8px; border-radius: 4px; font-size: 11px;");
+            titleRow->addWidget(catBadge);
+        }
+
+        titleRow->addStretch();
+
+        QToolButton* btnEditItemHeader = new QToolButton(itemCard);
+        btnEditItemHeader->setIcon(IconUtils::getIcon(IconType::Edit, QColor(70, 70, 70)));
+        btnEditItemHeader->setToolTip(QStringLiteral("Item bewerken (Titel, URL, Categorie, Notities) [F2]"));
+        btnEditItemHeader->setAutoRaise(true);
+        connect(btnEditItemHeader, &QToolButton::clicked, this, [this, item]() {
+            m_editingItem = true;
+            populateAccountList(item);
+        });
+        titleRow->addWidget(btnEditItemHeader);
+
+        m_btnAddAccount = new QToolButton(itemCard);
+        m_btnAddAccount->setIcon(IconUtils::getIcon(IconType::Plus, QColor(0, 122, 255)));
+        m_btnAddAccount->setToolTip(QStringLiteral("Account toevoegen aan dit item"));
+        m_btnAddAccount->setAutoRaise(true);
+        connect(m_btnAddAccount, &QToolButton::clicked, this, &VaultDialog::onAddAccount);
+        titleRow->addWidget(m_btnAddAccount);
+
+        icLayout->addLayout(titleRow);
+
+        // Only filled item fields:
+        if (!item->url.isEmpty()) {
+            QHBoxLayout* urlRow = new QHBoxLayout();
+            QLabel* urlIcon = new QLabel(itemCard);
+            urlIcon->setPixmap(IconUtils::getPixmap(IconType::Key, QColor(100, 100, 100), 16));
+            QLabel* urlLabel = new QLabel(QString("<b>URL:</b> <a href=\"%1\" style=\"color: #0284c7; text-decoration: none;\">%1</a>").arg(item->url), itemCard);
+            urlLabel->setOpenExternalLinks(true);
+            urlRow->addWidget(urlIcon);
+            urlRow->addWidget(urlLabel);
+            urlRow->addStretch();
+
+            QToolButton* btnCopyUrl = new QToolButton(itemCard);
+            btnCopyUrl->setIcon(IconUtils::getIcon(IconType::Copy, QColor(70, 70, 70)));
+            btnCopyUrl->setToolTip(QStringLiteral("URL kopiëren"));
+            btnCopyUrl->setAutoRaise(true);
+            connect(btnCopyUrl, &QToolButton::clicked, this, [item]() {
+                QApplication::clipboard()->setText(item->url);
+            });
+            urlRow->addWidget(btnCopyUrl);
+            icLayout->addLayout(urlRow);
+        }
+
+        // Notes (decrypted if present)
+        if (!item->notesEncrypted.isEmpty()) {
+            QString decryptedNotes;
+            if (core::VaultCrypto::decryptPassword(item->notesEncrypted, item->notesNonce, item->notesTag, m_masterKey, decryptedNotes) && !decryptedNotes.isEmpty()) {
+                QLabel* noteLabel = new QLabel(QString("<b>Notities:</b> %1").arg(decryptedNotes.toHtmlEscaped()), itemCard);
+                noteLabel->setWordWrap(true);
+                noteLabel->setStyleSheet("color: #475569; font-size: 12px; background: #ffffff; padding: 4px 8px; border-radius: 4px; border: 1px solid #e2e8f0;");
+                icLayout->addWidget(noteLabel);
+            }
+        }
+
+        // Timestamps
+        QLabel* metaLabel = new QLabel(QString("Aangemaakt: %1 | Gewijzigd: %2 | Laatst geopend: %3")
+            .arg(formatTimestamp(item->createdAt), formatTimestamp(item->updatedAt), formatTimestamp(item->lastAccessed)), itemCard);
+        metaLabel->setStyleSheet("color: #94a3b8; font-size: 11px;");
+        icLayout->addWidget(metaLabel);
+
+        m_itemHeaderLayout->addWidget(itemCard);
+    } else {
+        // EDIT MODE for Item: Show ALL editable fields with Cancel and Save icon buttons
+        QFrame* editFrame = new QFrame(m_itemHeaderContainer);
+        editFrame->setStyleSheet("QFrame { background-color: #f0f7ff; border: 1.5px solid #007aff; border-radius: 6px; padding: 10px; }");
+        QVBoxLayout* efLayout = new QVBoxLayout(editFrame);
+        efLayout->setSpacing(8);
+
+        QHBoxLayout* efHeader = new QHBoxLayout();
+        QLabel* editTitle = new QLabel(QStringLiteral("Item Gegevens Bewerken"), editFrame);
+        editTitle->setStyleSheet("font-weight: bold; font-size: 14px; color: #007aff;");
+        efHeader->addWidget(editTitle);
+        efHeader->addStretch();
+
+        QToolButton* btnSaveItem = new QToolButton(editFrame);
+        btnSaveItem->setIcon(IconUtils::getIcon(IconType::Save, QColor(40, 167, 69)));
+        btnSaveItem->setToolTip(QStringLiteral("Item wijzigingen opslaan (Save)"));
+        btnSaveItem->setAutoRaise(true);
+        efHeader->addWidget(btnSaveItem);
+
+        QToolButton* btnCancelItem = new QToolButton(editFrame);
+        btnCancelItem->setIcon(IconUtils::getIcon(IconType::Cancel, QColor(220, 50, 50)));
+        btnCancelItem->setToolTip(QStringLiteral("Annuleren (Cancel)"));
+        btnCancelItem->setAutoRaise(true);
+        efHeader->addWidget(btnCancelItem);
+
+        efLayout->addLayout(efHeader);
+
+        QFormLayout* form = new QFormLayout();
+        form->setSpacing(6);
+
+        QLineEdit* editTitleInput = new QLineEdit(editFrame);
+        editTitleInput->setText(item->title);
+        editTitleInput->setPlaceholderText(QStringLiteral("Titel van het item / website"));
+        form->addRow(QStringLiteral("Titel:"), editTitleInput);
+
+        QLineEdit* editUrlInput = new QLineEdit(editFrame);
+        editUrlInput->setText(item->url);
+        editUrlInput->setPlaceholderText(QStringLiteral("https://www.voorbeeld.nl"));
+        form->addRow(QStringLiteral("Website / URL:"), editUrlInput);
+
+        QLineEdit* editCatInput = new QLineEdit(editFrame);
+        editCatInput->setText(item->category);
+        editCatInput->setPlaceholderText(QStringLiteral("Bijv. Werk, Privé, Social, Bank"));
+        form->addRow(QStringLiteral("Categorie:"), editCatInput);
+
+        QString currentNotes;
+        if (!item->notesEncrypted.isEmpty()) {
+            core::VaultCrypto::decryptPassword(item->notesEncrypted, item->notesNonce, item->notesTag, m_masterKey, currentNotes);
+        }
+        QLineEdit* editNotesInput = new QLineEdit(editFrame);
+        editNotesInput->setText(currentNotes);
+        editNotesInput->setPlaceholderText(QStringLiteral("Optionele notities of opmerkingen"));
+        form->addRow(QStringLiteral("Notities:"), editNotesInput);
+
+        efLayout->addLayout(form);
+
+        connect(btnSaveItem, &QToolButton::clicked, this, [this, item, editTitleInput, editUrlInput, editCatInput, editNotesInput]() {
+            QString newTitle = editTitleInput->text().trimmed();
+            if (newTitle.isEmpty()) {
+                QMessageBox::warning(this, QStringLiteral("Invoer vereist"), QStringLiteral("Voer een titel in voor dit item."));
+                return;
+            }
+            item->title = newTitle;
+            item->url = editUrlInput->text().trimmed();
+            item->category = editCatInput->text().trimmed();
+
+            QString notes = editNotesInput->text().trimmed();
+            if (!notes.isEmpty()) {
+                core::VaultCrypto::encryptPassword(notes, m_masterKey, item->notesEncrypted, item->notesNonce, item->notesTag);
+            } else {
+                item->notesEncrypted.clear();
+                item->notesNonce.clear();
+                item->notesTag.clear();
+            }
+
+            item->updatedAt = QDateTime::currentDateTimeUtc();
+            m_modified = true;
+            saveCurrentVault();
+            m_editingItem = false;
+            populateTree(m_searchEdit->text());
+            populateAccountList(item);
+        });
+
+        connect(btnCancelItem, &QToolButton::clicked, this, [this, item]() {
+            m_editingItem = false;
+            populateAccountList(item);
+        });
+
+        m_itemHeaderLayout->addWidget(editFrame);
+    }
+
+    // --- ACCOUNTS SECTION ---
+    // Check if adding new account (m_editingAccountIndex == -2)
+    if (m_editingAccountIndex == -2) {
+        QFrame* newCard = new QFrame(m_accountsContainer);
+        newCard->setStyleSheet("QFrame { background-color: #f0fdf4; border: 1.5px solid #22c55e; border-radius: 6px; padding: 10px; }");
+        QVBoxLayout* ncLayout = new QVBoxLayout(newCard);
+        ncLayout->setSpacing(8);
+
+        QHBoxLayout* ncHeader = new QHBoxLayout();
+        QLabel* ncTitle = new QLabel(QStringLiteral("Nieuw Account Toevoegen"), newCard);
+        ncTitle->setStyleSheet("font-weight: bold; font-size: 13px; color: #15803d;");
+        ncHeader->addWidget(ncTitle);
+        ncHeader->addStretch();
+
+        QToolButton* btnSaveNew = new QToolButton(newCard);
+        btnSaveNew->setIcon(IconUtils::getIcon(IconType::Save, QColor(40, 167, 69)));
+        btnSaveNew->setToolTip(QStringLiteral("Account opslaan (Save)"));
+        btnSaveNew->setAutoRaise(true);
+        ncHeader->addWidget(btnSaveNew);
+
+        QToolButton* btnCancelNew = new QToolButton(newCard);
+        btnCancelNew->setIcon(IconUtils::getIcon(IconType::Cancel, QColor(220, 50, 50)));
+        btnCancelNew->setToolTip(QStringLiteral("Annuleren (Cancel)"));
+        btnCancelNew->setAutoRaise(true);
+        ncHeader->addWidget(btnCancelNew);
+
+        ncLayout->addLayout(ncHeader);
+
+        QFormLayout* nForm = new QFormLayout();
+        nForm->setSpacing(6);
+
+        QLineEdit* nLabelEdit = new QLineEdit(newCard);
+        nLabelEdit->setPlaceholderText(QStringLiteral("Bijv. Privé, Werk, Hoofdaccount"));
+        nForm->addRow(QStringLiteral("Label / Naam:"), nLabelEdit);
+
+        QLineEdit* nUserEdit = new QLineEdit(newCard);
+        nUserEdit->setPlaceholderText(QStringLiteral("Gebruikersnaam"));
+        nForm->addRow(QStringLiteral("Gebruikersnaam:"), nUserEdit);
+
+        QLineEdit* nEmailEdit = new QLineEdit(newCard);
+        nEmailEdit->setPlaceholderText(QStringLiteral("naam@voorbeeld.nl"));
+        nForm->addRow(QStringLiteral("E-mailadres:"), nEmailEdit);
+
+        QCheckBox* nDefaultChk = new QCheckBox(QStringLiteral("Standaard e-mailadres (Default)"), newCard);
+        nDefaultChk->setChecked(item->accounts.isEmpty());
+        nForm->addRow(QStringLiteral(""), nDefaultChk);
+
+        QHBoxLayout* nPassLayout = new QHBoxLayout();
+        QLineEdit* nPassEdit = new QLineEdit(newCard);
+        nPassEdit->setEchoMode(QLineEdit::Password);
+        nPassEdit->setPlaceholderText(QStringLiteral("Wachtwoord"));
+        nPassLayout->addWidget(nPassEdit, 1);
+
+        QToolButton* nBtnReveal = new QToolButton(newCard);
+        nBtnReveal->setIcon(IconUtils::getIcon(IconType::Eye, QColor(70, 70, 70)));
+        nBtnReveal->setToolTip(QStringLiteral("Wachtwoord tonen (ingedrukt houden)"));
+        nBtnReveal->setAutoRaise(true);
+        nPassLayout->addWidget(nBtnReveal);
+
+        QToolButton* nBtnGen = new QToolButton(newCard);
+        nBtnGen->setIcon(IconUtils::getIcon(IconType::Refresh, QColor(0, 122, 255)));
+        nBtnGen->setToolTip(QStringLiteral("Genereer nieuw veilig wachtwoord"));
+        nBtnGen->setAutoRaise(true);
+        nPassLayout->addWidget(nBtnGen);
+
+        nForm->addRow(QStringLiteral("Wachtwoord:"), nPassLayout);
+        ncLayout->addLayout(nForm);
+
+        connect(nBtnReveal, &QToolButton::pressed, this, [nPassEdit]() { nPassEdit->setEchoMode(QLineEdit::Normal); });
+        connect(nBtnReveal, &QToolButton::released, this, [nPassEdit]() { nPassEdit->setEchoMode(QLineEdit::Password); });
+        connect(nBtnGen, &QToolButton::clicked, this, [this, nPassEdit]() {
+            std::string gen = core::PasswordGenerator::generate(m_vaultDoc.settings.toPasswordOptions());
+            nPassEdit->setText(QString::fromStdString(gen));
+        });
+
+        connect(btnSaveNew, &QToolButton::clicked, this, [this, item, nLabelEdit, nUserEdit, nEmailEdit, nDefaultChk, nPassEdit]() {
+            QString label = nLabelEdit->text().trimmed();
+            QString user = nUserEdit->text().trimmed();
+            QString email = nEmailEdit->text().trimmed();
+            QString pass = nPassEdit->text();
+
+            if (label.isEmpty() && user.isEmpty() && email.isEmpty() && pass.isEmpty()) {
+                QMessageBox::warning(this, QStringLiteral("Invoer vereist"), QStringLiteral("Vul minimaal één veld in voor het nieuwe account."));
+                return;
+            }
+
+            core::AccountEntry newAcc;
+            newAcc.id = "acc_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
+            newAcc.label = label;
+            newAcc.username = user;
+            newAcc.email = email;
+            newAcc.isDefaultEmail = nDefaultChk->isChecked();
+            newAcc.lastAccessed = QDateTime::currentDateTimeUtc();
+
+            if (!pass.isEmpty()) {
+                core::VaultCrypto::encryptPassword(pass, m_masterKey, newAcc.encryptedPassword, newAcc.nonce, newAcc.authTag);
+            }
+
+            if (newAcc.isDefaultEmail) {
+                for (auto& acc : item->accounts) acc.isDefaultEmail = false;
+            }
+
+            item->accounts.append(newAcc);
+            item->updatedAt = QDateTime::currentDateTimeUtc();
+            item->lastAccessed = item->updatedAt;
+            m_modified = true;
+            saveCurrentVault();
+
+            m_editingAccountIndex = -1;
+            populateAccountList(item);
+        });
+
+        connect(btnCancelNew, &QToolButton::clicked, this, [this, item]() {
+            m_editingAccountIndex = -1;
+            populateAccountList(item);
+        });
+
+        m_accountsLayout->addWidget(newCard);
+    }
+
+    if (item->accounts.isEmpty() && m_editingAccountIndex != -2) {
         QLabel* emptyLabel = new QLabel(QStringLiteral("Nog geen accounts opgeslagen onder dit item. Klik op '+' om een account toe te voegen."), m_accountsContainer);
         emptyLabel->setStyleSheet("color: #888; font-style: italic; padding: 20px;");
         m_accountsLayout->addWidget(emptyLabel);
     } else {
         for (int i = 0; i < item->accounts.size(); ++i) {
-            const auto& acc = item->accounts[i];
+            auto& acc = item->accounts[i];
             int accIdx = i;
 
-            QFrame* card = new QFrame(m_accountsContainer);
-            card->setFrameShape(QFrame::StyledPanel);
-            card->setStyleSheet("QFrame { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 6px; }");
+            if (m_editingAccountIndex == accIdx) {
+                // EDIT MODE for existing Account: Show ALL fields with Cancel and Save icon buttons
+                QFrame* card = new QFrame(m_accountsContainer);
+                card->setStyleSheet("QFrame { background-color: #f0f7ff; border: 1.5px solid #007aff; border-radius: 6px; padding: 10px; }");
 
-            QVBoxLayout* cardLayout = new QVBoxLayout(card);
-            cardLayout->setSpacing(6);
+                QVBoxLayout* cardLayout = new QVBoxLayout(card);
+                cardLayout->setSpacing(8);
 
-            // Row 1: Label + Default badge + Actions
-            QHBoxLayout* headerRow = new QHBoxLayout();
-            QLabel* labelText = new QLabel(acc.label.isEmpty() ? QString("Account %1").arg(i + 1) : acc.label, card);
-            labelText->setStyleSheet("font-weight: bold; font-size: 13px;");
-            headerRow->addWidget(labelText);
+                QHBoxLayout* headerRow = new QHBoxLayout();
+                QLabel* editHeader = new QLabel(QString("Account %1 Bewerken").arg(accIdx + 1), card);
+                editHeader->setStyleSheet("font-weight: bold; font-size: 13px; color: #007aff;");
+                headerRow->addWidget(editHeader);
+                headerRow->addStretch();
 
-            if (acc.isDefaultEmail) {
-                QLabel* badge = new QLabel(QStringLiteral("★ Default"), card);
-                badge->setStyleSheet("background-color: #e3f2fd; color: #1976d2; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 11px;");
-                headerRow->addWidget(badge);
-            }
+                QToolButton* btnSaveAcc = new QToolButton(card);
+                btnSaveAcc->setIcon(IconUtils::getIcon(IconType::Save, QColor(40, 167, 69)));
+                btnSaveAcc->setToolTip(QStringLiteral("Account wijzigingen opslaan (Save)"));
+                btnSaveAcc->setAutoRaise(true);
+                headerRow->addWidget(btnSaveAcc);
 
-            headerRow->addStretch();
+                QToolButton* btnCancelAcc = new QToolButton(card);
+                btnCancelAcc->setIcon(IconUtils::getIcon(IconType::Cancel, QColor(220, 50, 50)));
+                btnCancelAcc->setToolTip(QStringLiteral("Annuleren (Cancel)"));
+                btnCancelAcc->setAutoRaise(true);
+                headerRow->addWidget(btnCancelAcc);
 
-            // Edit Account
-            QToolButton* btnEditAcc = new QToolButton(card);
-            btnEditAcc->setIcon(IconUtils::getIcon(IconType::Edit, QColor(70, 70, 70)));
-            btnEditAcc->setToolTip(QStringLiteral("Account bewerken"));
-            btnEditAcc->setAutoRaise(true);
-            headerRow->addWidget(btnEditAcc);
+                cardLayout->addLayout(headerRow);
 
-            // Delete Account
-            QToolButton* btnDelAcc = new QToolButton(card);
-            btnDelAcc->setIcon(IconUtils::getIcon(IconType::Trash, QColor(220, 50, 50)));
-            btnDelAcc->setToolTip(QStringLiteral("Account verwijderen"));
-            btnDelAcc->setAutoRaise(true);
-            headerRow->addWidget(btnDelAcc);
+                QFormLayout* form = new QFormLayout();
+                form->setSpacing(6);
 
-            cardLayout->addLayout(headerRow);
+                QLineEdit* editLabel = new QLineEdit(card);
+                editLabel->setText(acc.label);
+                editLabel->setPlaceholderText(QStringLiteral("Bijv. Privé, Werk, Hoofdaccount"));
+                form->addRow(QStringLiteral("Label / Naam:"), editLabel);
 
-            // Row 2: Username & Email with quick copy
-            if (!acc.username.isEmpty()) {
-                QHBoxLayout* userRow = new QHBoxLayout();
-                QLabel* uIcon = new QLabel(card);
-                uIcon->setPixmap(IconUtils::getPixmap(IconType::User, QColor(100, 100, 100), 16));
-                QLabel* uText = new QLabel(acc.username, card);
-                userRow->addWidget(uIcon);
-                userRow->addWidget(uText);
-                userRow->addStretch();
+                QLineEdit* editUser = new QLineEdit(card);
+                editUser->setText(acc.username);
+                editUser->setPlaceholderText(QStringLiteral("Gebruikersnaam"));
+                form->addRow(QStringLiteral("Gebruikersnaam:"), editUser);
 
-                QToolButton* btnCopyUser = new QToolButton(card);
-                btnCopyUser->setIcon(IconUtils::getIcon(IconType::Copy, QColor(70, 70, 70)));
-                btnCopyUser->setToolTip(QStringLiteral("Gebruikersnaam kopiëren"));
-                btnCopyUser->setAutoRaise(true);
-                connect(btnCopyUser, &QToolButton::clicked, this, [acc]() {
-                    QApplication::clipboard()->setText(acc.username);
+                QLineEdit* editEmail = new QLineEdit(card);
+                editEmail->setText(acc.email);
+                editEmail->setPlaceholderText(QStringLiteral("naam@voorbeeld.nl"));
+                form->addRow(QStringLiteral("E-mailadres:"), editEmail);
+
+                QCheckBox* chkDefault = new QCheckBox(QStringLiteral("Standaard e-mailadres (Default)"), card);
+                chkDefault->setChecked(acc.isDefaultEmail);
+                form->addRow(QStringLiteral(""), chkDefault);
+
+                // Password row
+                QString currentPass;
+                core::VaultCrypto::decryptPassword(acc.encryptedPassword, acc.nonce, acc.authTag, m_masterKey, currentPass);
+
+                QHBoxLayout* passLayout = new QHBoxLayout();
+                QLineEdit* editPass = new QLineEdit(card);
+                editPass->setEchoMode(QLineEdit::Password);
+                editPass->setText(currentPass);
+                editPass->setPlaceholderText(QStringLiteral("Wachtwoord"));
+                passLayout->addWidget(editPass, 1);
+
+                QToolButton* btnReveal = new QToolButton(card);
+                btnReveal->setIcon(IconUtils::getIcon(IconType::Eye, QColor(70, 70, 70)));
+                btnReveal->setToolTip(QStringLiteral("Wachtwoord tonen (ingedrukt houden)"));
+                btnReveal->setAutoRaise(true);
+                passLayout->addWidget(btnReveal);
+
+                QToolButton* btnGen = new QToolButton(card);
+                btnGen->setIcon(IconUtils::getIcon(IconType::Refresh, QColor(0, 122, 255)));
+                btnGen->setToolTip(QStringLiteral("Genereer nieuw veilig wachtwoord"));
+                btnGen->setAutoRaise(true);
+                passLayout->addWidget(btnGen);
+
+                form->addRow(QStringLiteral("Wachtwoord:"), passLayout);
+                cardLayout->addLayout(form);
+
+                connect(btnReveal, &QToolButton::pressed, this, [editPass]() { editPass->setEchoMode(QLineEdit::Normal); });
+                connect(btnReveal, &QToolButton::released, this, [editPass]() { editPass->setEchoMode(QLineEdit::Password); });
+                connect(btnGen, &QToolButton::clicked, this, [this, editPass]() {
+                    std::string gen = core::PasswordGenerator::generate(m_vaultDoc.settings.toPasswordOptions());
+                    editPass->setText(QString::fromStdString(gen));
                 });
-                userRow->addWidget(btnCopyUser);
-                cardLayout->addLayout(userRow);
-            }
 
-            if (!acc.email.isEmpty()) {
-                QHBoxLayout* emailRow = new QHBoxLayout();
-                QLabel* eIcon = new QLabel(card);
-                eIcon->setPixmap(IconUtils::getPixmap(IconType::Mail, QColor(100, 100, 100), 16));
-                QLabel* eText = new QLabel(acc.email, card);
-                emailRow->addWidget(eIcon);
-                emailRow->addWidget(eText);
-                emailRow->addStretch();
+                connect(btnSaveAcc, &QToolButton::clicked, this, [this, item, accIdx, editLabel, editUser, editEmail, chkDefault, editPass]() {
+                    QString label = editLabel->text().trimmed();
+                    QString user = editUser->text().trimmed();
+                    QString email = editEmail->text().trimmed();
+                    QString pass = editPass->text();
 
-                QToolButton* btnCopyEmail = new QToolButton(card);
-                btnCopyEmail->setIcon(IconUtils::getIcon(IconType::Copy, QColor(70, 70, 70)));
-                btnCopyEmail->setToolTip(QStringLiteral("E-mailadres kopiëren"));
-                btnCopyEmail->setAutoRaise(true);
-                connect(btnCopyEmail, &QToolButton::clicked, this, [acc]() {
-                    QApplication::clipboard()->setText(acc.email);
-                });
-                emailRow->addWidget(btnCopyEmail);
-                cardLayout->addLayout(emailRow);
-            }
-
-            // Row 3: Password + Hold to Reveal + Copy
-            QHBoxLayout* passRow = new QHBoxLayout();
-            QLabel* pIcon = new QLabel(card);
-            pIcon->setPixmap(IconUtils::getPixmap(IconType::Lock, QColor(100, 100, 100), 16));
-            passRow->addWidget(pIcon);
-
-            QLineEdit* passEdit = new QLineEdit(card);
-            passEdit->setEchoMode(QLineEdit::Password);
-            passEdit->setReadOnly(true);
-            passEdit->setText("••••••••••••");
-            passRow->addWidget(passEdit, 1);
-
-            QToolButton* btnReveal = new QToolButton(card);
-            btnReveal->setIcon(IconUtils::getIcon(IconType::Eye, QColor(70, 70, 70)));
-            btnReveal->setToolTip(QStringLiteral("Wachtwoord tonen (ingedrukt houden)"));
-            btnReveal->setAutoRaise(true);
-            passRow->addWidget(btnReveal);
-
-            QToolButton* btnCopyPass = new QToolButton(card);
-            btnCopyPass->setIcon(IconUtils::getIcon(IconType::Copy, QColor(0, 122, 255)));
-            btnCopyPass->setToolTip(QStringLiteral("Wachtwoord kopiëren"));
-            btnCopyPass->setAutoRaise(true);
-            passRow->addWidget(btnCopyPass);
-
-            cardLayout->addLayout(passRow);
-
-            // Row 4: Last accessed timestamp
-            QLabel* accessLabel = new QLabel(QString("Laatst geopend: %1").arg(formatTimestamp(acc.lastAccessed)), card);
-            accessLabel->setStyleSheet("color: #777; font-size: 11px;");
-            cardLayout->addWidget(accessLabel);
-
-            // Decrypt password helper
-            auto decryptHelper = [this, acc, item, accIdx]() -> QString {
-                QString plaintext;
-                if (!core::VaultCrypto::decryptPassword(acc.encryptedPassword, acc.nonce, acc.authTag, m_masterKey, plaintext)) {
-                    return QString();
-                }
-                // Update last accessed
-                QDateTime now = QDateTime::currentDateTimeUtc();
-                if (item && accIdx < item->accounts.size()) {
-                    item->accounts[accIdx].lastAccessed = now;
-                    item->lastAccessed = now;
-                    m_modified = true;
-                    saveCurrentVault();
-                }
-                return plaintext;
-            };
-
-            // Connect Hold to reveal
-            connect(btnReveal, &QToolButton::pressed, this, [this, passEdit, decryptHelper, accessLabel]() {
-                if (m_vaultDoc.settings.requireBiometricsForReveal) {
-                    if (!core::BiometricAuth::authenticate(QStringLiteral("Verifieer uw identiteit om het opgeslagen kluiswachtwoord te bekijken."), this)) {
+                    if (label.isEmpty() && user.isEmpty() && email.isEmpty() && pass.isEmpty()) {
+                        QMessageBox::warning(this, QStringLiteral("Invoer vereist"), QStringLiteral("Vul minimaal één veld in voor het account."));
                         return;
                     }
+
+                    if (accIdx < item->accounts.size()) {
+                        auto& a = item->accounts[accIdx];
+                        a.label = label;
+                        a.username = user;
+                        a.email = email;
+                        a.isDefaultEmail = chkDefault->isChecked();
+                        a.lastAccessed = QDateTime::currentDateTimeUtc();
+
+                        if (!pass.isEmpty()) {
+                            core::VaultCrypto::encryptPassword(pass, m_masterKey, a.encryptedPassword, a.nonce, a.authTag);
+                        } else {
+                            a.encryptedPassword.clear();
+                            a.nonce.clear();
+                            a.authTag.clear();
+                        }
+
+                        if (a.isDefaultEmail) {
+                            for (int k = 0; k < item->accounts.size(); ++k) {
+                                if (k != accIdx) item->accounts[k].isDefaultEmail = false;
+                            }
+                        }
+
+                        item->updatedAt = QDateTime::currentDateTimeUtc();
+                        item->lastAccessed = item->updatedAt;
+                        m_modified = true;
+                        saveCurrentVault();
+                    }
+
+                    m_editingAccountIndex = -1;
+                    populateAccountList(item);
+                });
+
+                connect(btnCancelAcc, &QToolButton::clicked, this, [this, item]() {
+                    m_editingAccountIndex = -1;
+                    populateAccountList(item);
+                });
+
+                m_accountsLayout->addWidget(card);
+            } else {
+                // VIEW MODE: Show ONLY filled fields!
+                QFrame* card = new QFrame(m_accountsContainer);
+                card->setFrameShape(QFrame::StyledPanel);
+                card->setStyleSheet("QFrame { background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 6px; padding: 6px; }");
+
+                QVBoxLayout* cardLayout = new QVBoxLayout(card);
+                cardLayout->setSpacing(6);
+
+                // Row 1: Label + Default badge + Edit icon button + Delete icon button
+                QHBoxLayout* headerRow = new QHBoxLayout();
+                QLabel* labelText = new QLabel(acc.label.isEmpty() ? QString("Account %1").arg(i + 1) : acc.label, card);
+                labelText->setStyleSheet("font-weight: bold; font-size: 13px;");
+                headerRow->addWidget(labelText);
+
+                if (acc.isDefaultEmail) {
+                    QLabel* badge = new QLabel(QStringLiteral("★ Default"), card);
+                    badge->setStyleSheet("background-color: #e3f2fd; color: #1976d2; font-weight: bold; padding: 2px 6px; border-radius: 4px; font-size: 11px;");
+                    headerRow->addWidget(badge);
                 }
-                QString pt = decryptHelper();
-                if (!pt.isEmpty()) {
-                    passEdit->setText(pt);
-                    passEdit->setEchoMode(QLineEdit::Normal);
-                    accessLabel->setText(QString("Laatst geopend: %1").arg(formatTimestamp(QDateTime::currentDateTimeUtc())));
+
+                headerRow->addStretch();
+
+                // Edit Account icon button
+                QToolButton* btnEditAcc = new QToolButton(card);
+                btnEditAcc->setIcon(IconUtils::getIcon(IconType::Edit, QColor(70, 70, 70)));
+                btnEditAcc->setToolTip(QStringLiteral("Account bewerken"));
+                btnEditAcc->setAutoRaise(true);
+                headerRow->addWidget(btnEditAcc);
+
+                // Delete Account icon button
+                QToolButton* btnDelAcc = new QToolButton(card);
+                btnDelAcc->setIcon(IconUtils::getIcon(IconType::Trash, QColor(220, 50, 50)));
+                btnDelAcc->setToolTip(QStringLiteral("Account verwijderen"));
+                btnDelAcc->setAutoRaise(true);
+                headerRow->addWidget(btnDelAcc);
+
+                cardLayout->addLayout(headerRow);
+
+                // Row 2: Username (only if filled)
+                if (!acc.username.isEmpty()) {
+                    QHBoxLayout* userRow = new QHBoxLayout();
+                    QLabel* uIcon = new QLabel(card);
+                    uIcon->setPixmap(IconUtils::getPixmap(IconType::User, QColor(100, 100, 100), 16));
+                    QLabel* uText = new QLabel(acc.username, card);
+                    userRow->addWidget(uIcon);
+                    userRow->addWidget(uText);
+                    userRow->addStretch();
+
+                    QToolButton* btnCopyUser = new QToolButton(card);
+                    btnCopyUser->setIcon(IconUtils::getIcon(IconType::Copy, QColor(70, 70, 70)));
+                    btnCopyUser->setToolTip(QStringLiteral("Gebruikersnaam kopiëren"));
+                    btnCopyUser->setAutoRaise(true);
+                    connect(btnCopyUser, &QToolButton::clicked, this, [acc]() {
+                        QApplication::clipboard()->setText(acc.username);
+                    });
+                    userRow->addWidget(btnCopyUser);
+                    cardLayout->addLayout(userRow);
                 }
-            });
-            connect(btnReveal, &QToolButton::released, this, [passEdit]() {
-                passEdit->setText("••••••••••••");
+
+                // Row 3: Email (only if filled)
+                if (!acc.email.isEmpty()) {
+                    QHBoxLayout* emailRow = new QHBoxLayout();
+                    QLabel* eIcon = new QLabel(card);
+                    eIcon->setPixmap(IconUtils::getPixmap(IconType::Mail, QColor(100, 100, 100), 16));
+                    QLabel* eText = new QLabel(acc.email, card);
+                    emailRow->addWidget(eIcon);
+                    emailRow->addWidget(eText);
+                    emailRow->addStretch();
+
+                    QToolButton* btnCopyEmail = new QToolButton(card);
+                    btnCopyEmail->setIcon(IconUtils::getIcon(IconType::Copy, QColor(70, 70, 70)));
+                    btnCopyEmail->setToolTip(QStringLiteral("E-mailadres kopiëren"));
+                    btnCopyEmail->setAutoRaise(true);
+                    connect(btnCopyEmail, &QToolButton::clicked, this, [acc]() {
+                        QApplication::clipboard()->setText(acc.email);
+                    });
+                    emailRow->addWidget(btnCopyEmail);
+                    cardLayout->addLayout(emailRow);
+                }
+
+                // Row 4: Password row
+                QHBoxLayout* passRow = new QHBoxLayout();
+                QLabel* pIcon = new QLabel(card);
+                pIcon->setPixmap(IconUtils::getPixmap(IconType::Lock, QColor(100, 100, 100), 16));
+                passRow->addWidget(pIcon);
+
+                QLineEdit* passEdit = new QLineEdit(card);
                 passEdit->setEchoMode(QLineEdit::Password);
-            });
+                passEdit->setReadOnly(true);
+                passEdit->setText("••••••••••••");
+                passRow->addWidget(passEdit, 1);
 
-            // Connect Copy Password
-            connect(btnCopyPass, &QToolButton::clicked, this, [this, decryptHelper, accessLabel]() {
-                if (m_vaultDoc.settings.requireBiometricsForCopy) {
-                    if (!core::BiometricAuth::authenticate(QStringLiteral("Verifieer uw identiteit om het opgeslagen kluiswachtwoord te kopiëren."), this)) {
-                        return;
+                QToolButton* btnReveal = new QToolButton(card);
+                btnReveal->setIcon(IconUtils::getIcon(IconType::Eye, QColor(70, 70, 70)));
+                btnReveal->setToolTip(QStringLiteral("Wachtwoord tonen (ingedrukt houden)"));
+                btnReveal->setAutoRaise(true);
+                passRow->addWidget(btnReveal);
+
+                QToolButton* btnCopyPass = new QToolButton(card);
+                btnCopyPass->setIcon(IconUtils::getIcon(IconType::Copy, QColor(0, 122, 255)));
+                btnCopyPass->setToolTip(QStringLiteral("Wachtwoord kopiëren"));
+                btnCopyPass->setAutoRaise(true);
+                passRow->addWidget(btnCopyPass);
+
+                cardLayout->addLayout(passRow);
+
+                // Row 5: Last accessed
+                QLabel* accessLabel = new QLabel(QString("Laatst geopend: %1").arg(formatTimestamp(acc.lastAccessed)), card);
+                accessLabel->setStyleSheet("color: #777; font-size: 11px;");
+                cardLayout->addWidget(accessLabel);
+
+                auto decryptHelper = [this, acc, item, accIdx]() -> QString {
+                    QString plaintext;
+                    if (!core::VaultCrypto::decryptPassword(acc.encryptedPassword, acc.nonce, acc.authTag, m_masterKey, plaintext)) {
+                        return QString();
                     }
-                }
-                QString pt = decryptHelper();
-                if (!pt.isEmpty()) {
-                    QApplication::clipboard()->setText(pt);
-                    accessLabel->setText(QString("Laatst geopend: %1").arg(formatTimestamp(QDateTime::currentDateTimeUtc())));
-                    QMessageBox::information(this, QStringLiteral("Gekopieerd"), QStringLiteral("Wachtwoord gekopieerd naar klembord."));
-                } else {
-                    QMessageBox::warning(this, QStringLiteral("Fout"), QStringLiteral("Kan wachtwoord niet ontsleutelen met huidige sleutel."));
-                }
-            });
+                    QDateTime now = QDateTime::currentDateTimeUtc();
+                    if (item && accIdx < item->accounts.size()) {
+                        item->accounts[accIdx].lastAccessed = now;
+                        item->lastAccessed = now;
+                        m_modified = true;
+                        saveCurrentVault();
+                    }
+                    return plaintext;
+                };
 
-            connect(btnEditAcc, &QToolButton::clicked, this, [this, accIdx]() {
-                onEditAccount(accIdx);
-            });
-            connect(btnDelAcc, &QToolButton::clicked, this, [this, accIdx]() {
-                onDeleteAccount(accIdx);
-            });
+                connect(btnReveal, &QToolButton::pressed, this, [this, passEdit, decryptHelper, accessLabel]() {
+                    if (m_vaultDoc.settings.requireBiometricsForReveal) {
+                        if (!core::BiometricAuth::authenticate(QStringLiteral("Verifieer uw identiteit om het opgeslagen kluiswachtwoord te bekijken."), this)) {
+                            return;
+                        }
+                    }
+                    QString pt = decryptHelper();
+                    if (!pt.isEmpty()) {
+                        passEdit->setText(pt);
+                        passEdit->setEchoMode(QLineEdit::Normal);
+                        accessLabel->setText(QString("Laatst geopend: %1").arg(formatTimestamp(QDateTime::currentDateTimeUtc())));
+                    }
+                });
+                connect(btnReveal, &QToolButton::released, this, [passEdit]() {
+                    passEdit->setText("••••••••••••");
+                    passEdit->setEchoMode(QLineEdit::Password);
+                });
 
-            m_accountsLayout->addWidget(card);
+                connect(btnCopyPass, &QToolButton::clicked, this, [this, decryptHelper, accessLabel]() {
+                    if (m_vaultDoc.settings.requireBiometricsForCopy) {
+                        if (!core::BiometricAuth::authenticate(QStringLiteral("Verifieer uw identiteit om het opgeslagen kluiswachtwoord te kopiëren."), this)) {
+                            return;
+                        }
+                    }
+                    QString pt = decryptHelper();
+                    if (!pt.isEmpty()) {
+                        QApplication::clipboard()->setText(pt);
+                        accessLabel->setText(QString("Laatst geopend: %1").arg(formatTimestamp(QDateTime::currentDateTimeUtc())));
+                        QMessageBox::information(this, QStringLiteral("Gekopieerd"), QStringLiteral("Wachtwoord gekopieerd naar klembord."));
+                    } else {
+                        QMessageBox::warning(this, QStringLiteral("Fout"), QStringLiteral("Kan wachtwoord niet ontsleutelen met huidige sleutel."));
+                    }
+                });
+
+                connect(btnEditAcc, &QToolButton::clicked, this, [this, accIdx, item]() {
+                    m_editingAccountIndex = accIdx;
+                    populateAccountList(item);
+                });
+                connect(btnDelAcc, &QToolButton::clicked, this, [this, accIdx]() {
+                    onDeleteAccount(accIdx);
+                });
+
+                m_accountsLayout->addWidget(card);
+            }
         }
     }
 
@@ -517,18 +931,8 @@ void VaultDialog::onAddItem() {
 void VaultDialog::onEditItem() {
     core::VaultItem* item = getSelectedItem();
     if (item) {
-        bool ok = false;
-        QString title = QInputDialog::getText(this, QStringLiteral("Item Bewerken"), 
-                                             QStringLiteral("Titel:"), 
-                                             QLineEdit::Normal, item->title, &ok);
-        if (ok && !title.trimmed().isEmpty()) {
-            item->title = title.trimmed();
-            item->updatedAt = QDateTime::currentDateTimeUtc();
-            m_modified = true;
-            saveCurrentVault();
-            populateTree(m_searchEdit->text());
-            populateAccountList(item);
-        }
+        m_editingItem = true;
+        populateAccountList(item);
         return;
     }
 
@@ -592,79 +996,16 @@ void VaultDialog::onAddAccount() {
     core::VaultItem* item = getSelectedItem();
     if (!item) return;
 
-    core::AccountEntry newAcc;
-    newAcc.id = "acc_" + QUuid::createUuid().toString(QUuid::WithoutBraces);
-    newAcc.lastAccessed = QDateTime::currentDateTimeUtc();
-    newAcc.isDefaultEmail = item->accounts.isEmpty(); // First account default by default
-
-    AccountEditDialog dlg(newAcc, QString(), m_vaultDoc.settings.toPasswordOptions(), this);
-    if (dlg.exec() == QDialog::Accepted) {
-        core::AccountEntry created = dlg.getAccount();
-        QString plainPass = dlg.getPassword();
-
-        if (!plainPass.isEmpty()) {
-            core::VaultCrypto::encryptPassword(plainPass, m_masterKey, 
-                                               created.encryptedPassword, 
-                                               created.nonce, 
-                                               created.authTag);
-        }
-
-        // If this account is default, unmark others
-        if (created.isDefaultEmail) {
-            for (auto& acc : item->accounts) {
-                acc.isDefaultEmail = false;
-            }
-        }
-
-        created.lastAccessed = QDateTime::currentDateTimeUtc();
-        item->accounts.append(created);
-        item->updatedAt = QDateTime::currentDateTimeUtc();
-        item->lastAccessed = item->updatedAt;
-
-        m_modified = true;
-        saveCurrentVault();
-        populateAccountList(item);
-    }
+    m_editingAccountIndex = -2; // Start inline addition
+    populateAccountList(item);
 }
 
 void VaultDialog::onEditAccount(int accountIndex) {
     core::VaultItem* item = getSelectedItem();
     if (!item || accountIndex < 0 || accountIndex >= item->accounts.size()) return;
 
-    core::AccountEntry& acc = item->accounts[accountIndex];
-    QString currentPass;
-    core::VaultCrypto::decryptPassword(acc.encryptedPassword, acc.nonce, acc.authTag, m_masterKey, currentPass);
-
-    AccountEditDialog dlg(acc, currentPass, m_vaultDoc.settings.toPasswordOptions(), this);
-    if (dlg.exec() == QDialog::Accepted) {
-        core::AccountEntry updated = dlg.getAccount();
-        QString plainPass = dlg.getPassword();
-
-        if (!plainPass.isEmpty()) {
-            core::VaultCrypto::encryptPassword(plainPass, m_masterKey, 
-                                               updated.encryptedPassword, 
-                                               updated.nonce, 
-                                               updated.authTag);
-        }
-
-        // If this account is default, unmark others
-        if (updated.isDefaultEmail) {
-            for (int i = 0; i < item->accounts.size(); ++i) {
-                if (i != accountIndex) {
-                    item->accounts[i].isDefaultEmail = false;
-                }
-            }
-        }
-
-        updated.lastAccessed = QDateTime::currentDateTimeUtc();
-        item->accounts[accountIndex] = updated;
-        item->updatedAt = QDateTime::currentDateTimeUtc();
-        item->lastAccessed = item->updatedAt;
-
-        m_modified = true;
-        saveCurrentVault();
-        populateAccountList(item);
-    }
+    m_editingAccountIndex = accountIndex; // Start inline edit
+    populateAccountList(item);
 }
 
 void VaultDialog::onDeleteAccount(int accountIndex) {

@@ -210,6 +210,7 @@ QJsonObject VaultSettings::toJson() const {
     obj["require_biometrics_for_vault"] = requireBiometricsForVault;
     obj["preferred_provider"] = static_cast<int>(preferredProvider);
     obj["custom_vault_path"] = customVaultPath;
+    obj["selected_onedrive_dir"] = selectedOneDriveDir;
     return obj;
 }
 
@@ -230,6 +231,7 @@ VaultSettings VaultSettings::fromJson(const QJsonObject& obj) {
     s.requireBiometricsForVault = obj.value("require_biometrics_for_vault").toBool(false);
     s.preferredProvider = static_cast<CloudProvider>(obj.value("preferred_provider").toInt(static_cast<int>(CloudProvider::OneDrive)));
     s.customVaultPath = obj.value("custom_vault_path").toString();
+    s.selectedOneDriveDir = obj.value("selected_onedrive_dir").toString();
     return s;
 }
 
